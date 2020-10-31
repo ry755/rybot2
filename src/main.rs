@@ -296,8 +296,7 @@ async fn boop(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 // inverts a user's profile picture
 #[command]
 async fn invert(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
-    let mentioned_users = &msg.mentions;
-    let user = &mentioned_users[0];
+    let user = &msg.mentions.get(0).unwrap_or(&msg.author);
     let pfp_url = match user.avatar_url() {
         Some(pfp_url) => pfp_url,
         None => {
