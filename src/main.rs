@@ -151,7 +151,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
         }
     };
 
-    let manager_lock = ctx.data.read().await.get::<VoiceManager>().cloned().expect("Expected VoiceManager in TypeMap");
+    let manager_lock = ctx.data.read().await.get::<VoiceManager>().cloned().ok_or("Expected VoiceManager in TypeMap")?;
     let mut manager = manager_lock.lock().await;
 
     if manager.join(guild_id, connect_to).is_some() {
@@ -175,7 +175,7 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
         },
     };
 
-    let manager_lock = ctx.data.read().await.get::<VoiceManager>().cloned().expect("Expected VoiceManager in TypeMap");
+    let manager_lock = ctx.data.read().await.get::<VoiceManager>().cloned().ok_or("Expected VoiceManager in TypeMap")?;
     let mut manager = manager_lock.lock().await;
     let has_handler = manager.get(guild_id).is_some();
 
@@ -219,7 +219,7 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     };
 
     let manager_lock = ctx.data.read().await
-        .get::<VoiceManager>().cloned().expect("Expected VoiceManager in TypeMap");
+        .get::<VoiceManager>().cloned().ok_or("Expected VoiceManager in TypeMap")?;
     let mut manager = manager_lock.lock().await;
 
     if let Some(handler) = manager.get_mut(guild_id) {
@@ -306,12 +306,12 @@ async fn invert(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         },
     };
 
-    let response = reqwest::get(&pfp_url).await.expect("Bad response");
-    let content = response.bytes().await.expect("Failed to get response");
+    let response = reqwest::get(&pfp_url).await?;
+    let content = response.bytes().await?;
 
-    let file = Builder::new().suffix(".png").tempfile().expect("Failed to create temp file");
+    let file = Builder::new().suffix(".png").tempfile()?;
 
-    let (width, height, buf) = WebPDecodeRGB(content.as_ref()).expect("Invalid WebP header");
+    let (width, height, buf) = WebPDecodeRGB(content.as_ref())?;
     let mut pixel_buf = match RgbImage::from_vec(width, height, buf.to_vec()) {
         Some(pixel_buf) => pixel_buf,
         None => return Ok(()) // return from command early
@@ -324,7 +324,7 @@ async fn invert(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         None => return Ok(()) // return from command early
     };
     println!("temp file location: {:?}", file_path);
-    pixel_buf.save(file_path).expect("Failed to save file");
+    pixel_buf.save(file_path)?;
     let path = vec![file_path];
     if let Err(why) = msg.channel_id.send_files(&ctx.http, path, |m| {
         m.content("")
@@ -354,7 +354,7 @@ async fn shell(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let bash_shell = Command::new("bash")
         .arg("-c")
         .arg(bash_args)
-        .output().expect("bruh");
+        .output()?;
 
     let mut output_string = String::from("```");
     let closing_string = String::from("```");
