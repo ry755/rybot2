@@ -1,0 +1,21 @@
+[package]
+name = "rybot2"
+version = "0.1.0"
+authors = ["ry755"]
+edition = "2018"
+
+[dependencies]
+unicode_skeleton = "0.1.1"
+image = "0.23.10"
+libwebp = { version = "0.1.2", features = ["0_6"] }
+error-chain = "0.12.4"
+tempfile = "3.1.0"
+reqwest = { version = "0.10", features = ["json"] }
+
+[dependencies.serenity]
+version = "0.9.0-rc.2"
+features = ["builder", "cache", "framework", "standard_framework", "rustls_backend", "http", "voice"]
+
+[dependencies.tokio]
+version = "0.2"
+features = ["macros", "full"]
