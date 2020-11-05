@@ -63,7 +63,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(about, say, boop, invert, shell, ping, join, leave, play)]
+#[commands(about, say, boop, invert, shell, ping, join, leave, play, dm)]
 struct General;
 
 #[hook]
@@ -261,6 +261,34 @@ async fn say(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let content = content_safe(&ctx.cache, &args.rest(), &settings).await;
 
     send_msg(&ctx, &msg, &content).await;
+
+    Ok(())
+}
+
+// sends a DM to the specified user
+#[command]
+async fn dm(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let user = &msg.mentions.get(0);
+    match user {
+        Some(user) => user,
+        None => {
+            send_msg(&ctx, &msg, "Mention someone to DM! uwu").await;
+
+            return Ok(()); // return from command early
+        },
+    };
+    // this is probably a bad way of removing the mentioned user from the argument string
+    let mut parsed_args = Args::new(args.rest(), &[Delimiter::Single(' ')]);
+    parsed_args.advance();
+    let mut message = msg.author.name.to_string();
+    message.push_str(" says ");
+    message.push_str(parsed_args.rest());
+
+    // using unwrap() should be ok here since we already know we have a good value
+    let _ = user.unwrap().dm(&ctx.http, |m| {
+        m.content(message);
+        m
+    }).await;
 
     Ok(())
 }
