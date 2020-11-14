@@ -102,8 +102,8 @@ async fn main() {
 
     let framework = StandardFramework::new()
         .configure(|c| c
-                   .with_whitespace(true)
-                   .prefix("~"))
+            .with_whitespace(true)
+            .prefix("~"))
         .normal_message(normal_message)
         .group(&GENERAL_GROUP);
 
@@ -249,7 +249,7 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 #[command]
 async fn say(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let settings = if let Some(guild_id) = msg.guild_id {
-       ContentSafeOptions::default()
+        ContentSafeOptions::default()
             .clean_channel(false)
             .display_as_member_from(guild_id)
     } else {
