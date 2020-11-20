@@ -1,4 +1,4 @@
-use std::{env, sync::Arc, process::Command};
+use std::{env, sync::Arc, process::Command, convert::TryInto};
 use serenity::{
     async_trait,
     client::bridge::gateway::ShardManager,
@@ -17,6 +17,34 @@ use serenity::{
     utils::{content_safe, ContentSafeOptions},
     voice,
 };
+
+use z80emu::*;
+extern crate hex;
+type TsClock = host::TsCounter<i32>;
+
+// Z80 memory
+#[derive(Clone, Debug)]
+struct Bus {
+    rom: [u8; 512]
+}
+
+fn vec_to_array<T>(v: Vec<T>) -> [T; 512] {
+    v.try_into()
+        .unwrap_or_else(|v: Vec<T>| panic!("Expected a Vec of length {} but it was {}", 512, v.len()))
+}
+
+impl Io for Bus {
+    type Timestamp = i32;
+    type WrIoBreak = ();
+    type RetiBreak = ();
+}
+
+impl Memory for Bus {
+    type Timestamp = i32;
+    fn read_debug(&self, addr: u16) -> u8 {
+        self.rom[addr as usize]
+    }
+}
 
 use serenity::prelude::*;
 use tokio::sync::Mutex;
@@ -61,7 +89,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(about, say, boop, invert, shell, ping, join, leave, play, dm)]
+#[commands(about, say, boop, invert, shell, ping, join, leave, play, dm, z80)]
 struct General;
 
 #[hook]
@@ -398,6 +426,54 @@ async fn shell(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     }
 
     send_msg(&ctx, &msg, &output_string).await;
+
+    Ok(())
+}
+
+// execute Z80 opcodes and print the resulting register contents
+#[command]
+async fn z80(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let input = args.rest().split_whitespace().collect::<String>();
+    let mut tsc = TsClock::default();
+    let mut cpu = Z80CMOS::default();
+
+    let mut memory_vec = hex::decode(input)?;
+
+    // fill the remaining memory with halt opcodes
+    for _ in 0..512-memory_vec.len() {
+        memory_vec.push(0x76);
+    }
+
+    let mut memory = Bus { rom: vec_to_array(memory_vec) };
+
+    let mut disassembly_string = String::from("Disassembly:\n```");
+
+    cpu.reset();
+    loop {
+        match cpu.execute_next(&mut memory, &mut tsc,
+                Some(|debug| disassembly_string.push_str(&format!("{}\n", format_args!("{:#X}", debug))) )) {
+            Err(BreakCause::Halt) => { break }
+            _ => {}
+        }
+    }
+
+    disassembly_string.push_str("```");
+
+    let reg_a = cpu.get_reg(Reg8::A, None);
+    let reg_bc = cpu.get_reg16(StkReg16::BC);
+    let reg_de = cpu.get_reg16(StkReg16::DE);
+    let reg_hl = cpu.get_reg16(StkReg16::HL);
+
+    let mut reg_string = String::from("Register contents on halt:\n```");
+
+    reg_string.push_str(&format!("A:  {:#04X}\n", reg_a));
+    reg_string.push_str(&format!("BC: {:#06X}\n", reg_bc));
+    reg_string.push_str(&format!("DE: {:#06X}\n", reg_de));
+    reg_string.push_str(&format!("HL: {:#06X}\n", reg_hl));
+    reg_string.push_str("```");
+
+    send_msg(&ctx, &msg, &disassembly_string).await;
+    send_msg(&ctx, &msg, &reg_string).await;
 
     Ok(())
 }
