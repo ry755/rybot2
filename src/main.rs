@@ -21,8 +21,6 @@ use serenity::{
 use serenity::prelude::*;
 use tokio::sync::Mutex;
 
-use unicode_skeleton::UnicodeSkeleton;
-
 use error_chain::error_chain;
 use tempfile::Builder;
 
@@ -68,8 +66,7 @@ struct General;
 
 #[hook]
 async fn normal_message(ctx: &Context, msg: &Message) {
-    let message_string_no_whitespace = msg.content.to_lowercase().split_whitespace().collect::<String>();
-    let message_string = message_string_no_whitespace.skeleton_chars().collect::<String>();
+    let message_string = msg.content.to_lowercase().split_whitespace().collect::<String>();
     if message_string.contains("fox") {
         println!("{} found a fox OwO", msg.author.name);
         react_msg(ctx, msg, ReactionType::Unicode("🦊".to_string())).await;
