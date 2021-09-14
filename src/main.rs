@@ -1,4 +1,5 @@
-use std::{sync::Arc, env, process::Command, convert::TryInto, num::NonZeroU16, io::Write, fs};
+use std::{convert::TryInto, env, num::NonZeroU16, sync::Arc};
+//use std::process::Command;
 use serenity::{
     async_trait,
     client::Context,
@@ -10,7 +11,7 @@ use serenity::{
     },
     model::{
         channel::{Message, ReactionType},
-        gateway::Ready,
+        gateway::{Activity, Ready},
     },
     utils::{content_safe, ContentSafeOptions},
     prelude::*,
@@ -34,12 +35,12 @@ type TsClock = host::TsCounter<i32>;
 struct Bus {
     vdp: TMS9918A,
     vdp_used: bool,
-    rom: [u8; 512],
+    rom: [u8; 65536],
 }
 
-fn vec_to_array<T>(v: Vec<T>) -> [T; 512] {
+fn vec_to_array<T>(v: Vec<T>) -> [T; 65536] {
     v.try_into()
-        .unwrap_or_else(|v: Vec<T>| panic!("Expected a Vec of length {} but it was {}", 512, v.len()))
+        .unwrap_or_else(|v: Vec<T>| panic!("Expected a Vec of length {} but it was {}", 65536, v.len()))
 }
 
 impl Io for Bus {
@@ -87,6 +88,10 @@ impl Memory for Bus {
     fn read_debug(&self, addr: u16) -> u8 {
         self.rom[addr as usize]
     }
+
+    fn write_mem(&mut self, addr: u16, value: u8, _ts: Self::Timestamp) {
+        self.rom[addr as usize] = value;
+    }
 }
 
 use error_chain::error_chain;
@@ -115,7 +120,7 @@ impl EventHandler for Handler {
 
 #[group]
 //#[commands(about, say, boop, invert, shell, ping, join, leave, play, dm, z80)]
-#[commands(about, say, boop, invert, ping, join, leave, play, dm, z80, z80asm)]
+#[commands(about, activity, say, boop, invert, ping, join, leave, play, dm, z80, z80file)]
 struct General;
 
 #[hook]
@@ -186,16 +191,20 @@ async fn main() {
     }
 }
 
-// joins the voice channel that the requesting user is currently in
+// sets the activity specified by the user
 #[command]
-#[only_in(guilds)]
-async fn join(ctx: &Context, msg: &Message) -> CommandResult {
+async fn activity(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let activity = args.rest();
+    ctx.set_activity(Activity::playing(activity)).await;
+    send_msg(&ctx, &msg, &format!("Activity set to \"Playing {}\"", activity)).await;
+    Ok(())
+}
+
+async fn join_impl(ctx: &Context, msg: &Message) -> CommandResult {
     let guild = msg.guild(&ctx.cache).await.unwrap();
     let guild_id = guild.id;
 
-    let channel_id = guild
-        .voice_states.get(&msg.author.id)
-        .and_then(|voice_state| voice_state.channel_id);
+    let channel_id = guild.voice_states.get(&msg.author.id).and_then(|voice_state| voice_state.channel_id);
 
     let connect_to = match channel_id {
         Some(channel) => channel,
@@ -206,12 +215,19 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
         }
     };
 
-    let manager = songbird::get(ctx).await
-        .expect("Songbird Voice client placed in at initialization.").clone();
+    let manager = songbird::get(ctx).await.expect("Error getting Songbird client").clone();
 
     let _handler = manager.join(guild_id, connect_to).await;
+    send_msg(&ctx, &msg, "Joined voice channel").await;
 
     Ok(())
+}
+
+// joins the voice channel that the requesting user is currently in
+#[command]
+#[only_in(guilds)]
+async fn join(ctx: &Context, msg: &Message) -> CommandResult {
+    join_impl(ctx, msg).await
 }
 
 // leaves the current voice channel
@@ -221,8 +237,7 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
     let guild = msg.guild(&ctx.cache).await.unwrap();
     let guild_id = guild.id;
 
-    let manager = songbird::get(ctx).await
-        .expect("Songbird Voice client placed in at initialization.").clone();
+    let manager = songbird::get(ctx).await.expect("Error getting Songbird client").clone();
     let has_handler = manager.get(guild_id).is_some();
 
     if has_handler {
@@ -242,47 +257,75 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
 // plays audio from requested URL in the current voice channel
 #[command]
 #[only_in(guilds)]
-async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let url = match args.single::<String>() {
-        Ok(url) => url,
-        Err(_) => {
-            send_msg(&ctx, &msg, "Must provide a URL to a video or audio").await;
-
-            return Ok(());
-        },
-    };
-
-    if !url.starts_with("http") {
-        send_msg(&ctx, &msg, "Must provide a valid URL").await;
-
-        return Ok(());
+async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let url_or_search = args.rest();
+    let mut should_search = false;
+    if !url_or_search.starts_with("http") {
+        //send_msg(&ctx, &msg, "Must provide a valid URL").await;
+        //return Ok(());
+        should_search = true;
     }
 
     let guild = msg.guild(&ctx.cache).await.unwrap();
     let guild_id = guild.id;
 
-    let manager = songbird::get(ctx).await
-        .expect("Songbird Voice client placed in at initialization.").clone();
+    let manager = songbird::get(ctx).await.expect("Error getting Songbird client").clone();
+
+    let handler_option = manager.get(guild_id);
+    if let None = handler_option {
+        if let Err(_) = join_impl(ctx, msg).await {}
+    }
 
     if let Some(handler_lock) = manager.get(guild_id) {
         let mut handler = handler_lock.lock().await;
 
-        let source = match songbird::ytdl(&url).await {
+        let source =
+            if should_search {
+                songbird::input::ytdl_search(&url_or_search).await
+            } else {
+                songbird::input::ytdl(&url_or_search).await
+            };
+
+        let source = match source {
             Ok(source) => source,
             Err(why) => {
                 println!("Error starting source: {:?}", why);
-
-                send_msg(&ctx, &msg, "Error sourcing ffmpeg").await;
-
+                send_msg(&ctx, &msg, "Error starting ffmpeg").await;
                 return Ok(());
             },
         };
 
-        handler.play_source(source);
+        {
+            let source_url_option = (&source.metadata.source_url).clone();
+            let source_url = source_url_option.unwrap_or("Unable to extract source URL".to_string());
+            send_msg(&ctx, &msg, &format!("Playing audio ({})", source_url)).await;
+        }
 
-        send_msg(&ctx, &msg, "Playing song").await;
+        handler.play_only_source(source);
     } else {
-        send_msg(&ctx, &msg, "Not in a voice channel to play in").await;
+        send_msg(&ctx, &msg, "Not in a voice channel").await;
+    }
+
+    Ok(())
+}
+
+// stops all audio playback
+#[command]
+#[only_in(guilds)]
+async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
+    let guild = msg.guild(&ctx.cache).await.unwrap();
+    let guild_id = guild.id;
+
+    let manager = songbird::get(ctx).await.expect("Error getting Songbird client").clone();
+
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let mut handler = handler_lock.lock().await;
+
+        handler.stop();
+
+        send_msg(&ctx, &msg, "Stopped audio playback").await;
+    } else {
+        send_msg(&ctx, &msg, "Not in a voice channel").await;
     }
 
     Ok(())
@@ -293,13 +336,9 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 #[command]
 async fn say(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let settings = if let Some(guild_id) = msg.guild_id {
-        ContentSafeOptions::default()
-            .clean_channel(false)
-            .display_as_member_from(guild_id)
+        ContentSafeOptions::default().clean_channel(false).display_as_member_from(guild_id)
     } else {
-        ContentSafeOptions::default()
-            .clean_channel(false)
-            .clean_role(false)
+        ContentSafeOptions::default().clean_channel(false).clean_role(false)
     };
 
     let content = content_safe(&ctx.cache, &args.rest(), &settings).await;
@@ -333,6 +372,8 @@ async fn dm(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         m.content(message);
         m
     }).await;
+
+    send_msg(&ctx, &msg, "Message sent! :3").await;
 
     Ok(())
 }
@@ -403,26 +444,19 @@ async fn invert(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     Ok(())
 }
 
-// execute a bash command and send the output
+/*// execute a bash command and send the output
 #[command]
 async fn shell(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let settings = if let Some(guild_id) = msg.guild_id {
-        ContentSafeOptions::default()
-            .clean_channel(false)
-            .display_as_member_from(guild_id)
+        ContentSafeOptions::default().clean_channel(false).display_as_member_from(guild_id)
     } else {
-        ContentSafeOptions::default()
-            .clean_channel(false)
-            .clean_role(false)
+        ContentSafeOptions::default().clean_channel(false).clean_role(false)
     };
 
     let bash_args = content_safe(&ctx.cache, &args.rest(), &settings).await;
     println!("{}", bash_args);
     //let bash_args = args.rest();
-    let bash_shell = Command::new("bash")
-        .arg("-c")
-        .arg(bash_args)
-        .output()?;
+    let bash_shell = Command::new("bash").arg("-c").arg(bash_args).output()?;
 
     let mut output_string = String::from("```");
     let closing_string = String::from("```");
@@ -443,7 +477,7 @@ async fn shell(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     send_msg(&ctx, &msg, &output_string).await;
 
     Ok(())
-}
+}*/
 
 // execute Z80 opcodes and print the resulting register contents
 #[command]
@@ -454,41 +488,11 @@ async fn z80(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     z80_execute(&ctx, &msg, memory_vec).await
 }
 
-// assemble and execute Z80 assembly code and print the resulting register contents
+// execute Z80 opcodes from an uploaded file and print the resulting register contents
 #[command]
-async fn z80asm(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let input = args.rest();
+async fn z80file(ctx: &Context, msg: &Message) -> CommandResult {
+    let memory_vec = msg.attachments[0].download().await.unwrap();
 
-    let mut asm_file = Builder::new().suffix(".s").tempfile()?;
-    println!("temp file location: {:?}", asm_file.path());
-
-    asm_file.write(input.as_bytes()).unwrap();
-
-    let vasm = Command::new("~/vasm/vasmz80_oldstyle")
-    .arg("-dotdir")
-    .arg("-Fbin")
-    .arg(asm_file.path())
-    .output().unwrap();
-
-    let mut output_string = String::from("```");
-    let closing_string = String::from("```");
-    let vasm_stdout = String::from_utf8_lossy(&vasm.stdout);
-    let vasm_stderr = String::from_utf8_lossy(&vasm.stderr);
-    if vasm_stdout != "" {
-        let vasm_stdout_clean = vasm_stdout.replace("```","`​`​`"); // add zero width spaces
-        output_string.push_str(&vasm_stdout_clean);
-        output_string.push_str(&closing_string);
-    } else if vasm_stderr != "" {
-        let vasm_stderr_clean = vasm_stdout.replace("```","`​`​`"); // add zero width spaces
-        output_string.push_str(&vasm_stderr_clean);
-        output_string.push_str(&closing_string);
-    } else {
-        output_string = String::from("Command completed with no output on `stdout` or `stderr`");
-    }
-
-    send_msg(&ctx, &msg, &output_string).await;
-
-    let memory_vec = fs::read("a.out").expect("Unable to read file");
     z80_execute(&ctx, &msg, memory_vec).await
 }
 
@@ -497,7 +501,7 @@ async fn z80_execute(ctx: &Context, msg: &Message, mut memory_vec: Vec<u8>) -> C
     let mut cpu = Z80CMOS::default();
 
     // fill the remaining memory with halt opcodes
-    for _ in 0..512-memory_vec.len() {
+    for _ in 0..65536-memory_vec.len() {
         memory_vec.push(0x76);
     }
 
@@ -505,18 +509,36 @@ async fn z80_execute(ctx: &Context, msg: &Message, mut memory_vec: Vec<u8>) -> C
 
     let mut disassembly_string = String::from("Disassembly:\n```");
 
+    let mut flag = false;
+    let _ = disasm::disasm_memory::<Z80CMOS, _, ()>(0x0000, &mut memory.rom, 
+        |debug| {
+            disassembly_string.push_str(&format!("{}\n", format_args!("{:#X}", debug)));
+            // if two halt instructions are found in a row, exit
+            if debug.code.as_slice() == [0x76] {
+                if flag == true {
+                    return Err(());
+                }
+                flag = true;
+            } else {
+                flag = false;
+            }
+            Ok(())
+        });
+
+    disassembly_string.push_str("```");
+    send_msg(&ctx, &msg, &disassembly_string).await;
+    println!("{}", &disassembly_string);
+
     cpu.reset();
     loop {
         match cpu.execute_next(&mut memory, &mut tsc,
-                Some(|debug| disassembly_string.push_str(&format!("{}\n", format_args!("{:#X}", debug))) )) {
+                Some(|_| print!("") )) {
             Err(BreakCause::Halt) => { break }
             _ => {}
         }
     }
 
     memory.vdp.update();
-
-    disassembly_string.push_str("```");
 
     let reg_a = cpu.get_reg(Reg8::A, None);
     let reg_bc = cpu.get_reg16(StkReg16::BC);
@@ -530,7 +552,6 @@ async fn z80_execute(ctx: &Context, msg: &Message, mut memory_vec: Vec<u8>) -> C
     reg_string.push_str(&format!("`DE: {:#06X}`\n", reg_de));
     reg_string.push_str(&format!("`HL: {:#06X}`\n", reg_hl));
 
-    //send_msg(&ctx, &msg, &disassembly_string).await;
     send_msg(&ctx, &msg, &reg_string).await;
 
     reg_string = String::from("TMS9918A register contents on halt:\n");

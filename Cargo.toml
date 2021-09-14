@@ -19,7 +19,7 @@ tracing-subscriber = "0.2"
 tracing-futures = "0.2"
 
 [dependencies.songbird]
-version = "0.1.2"
+version = "0.2.0"
 
 [dependencies.serenity]
 version = "0.10"
