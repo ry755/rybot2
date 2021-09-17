@@ -120,7 +120,7 @@ impl EventHandler for Handler {
 
 #[group]
 //#[commands(about, say, boop, invert, shell, ping, join, leave, play, dm, z80)]
-#[commands(about, activity, say, boop, invert, ping, join, leave, play, dm, z80, z80file)]
+#[commands(help, activity, say, boop, pfp, invert, ping, join, leave, play, stop, dm, z80, z80file)]
 struct General;
 
 #[hook]
@@ -189,6 +189,31 @@ async fn main() {
     if let Err(why) = client.start().await {
         println!("Client error: {:?}", why);
     }
+}
+
+#[command]
+async fn help(ctx: &Context, msg: &Message) -> CommandResult {
+    let mut help_string = format!("rybot2 {} ({})\n", env!("VERGEN_BUILD_SEMVER"), env!("VERGEN_GIT_SHA_SHORT"));
+    help_string.push_str(&format!("compiled on {} at {} ({})\n", env!("VERGEN_BUILD_DATE"), env!("VERGEN_BUILD_TIME"), env!("VERGEN_CARGO_PROFILE")));
+    help_string.push_str(&format!("rustc {} ({})\n\n", env!("VERGEN_RUSTC_SEMVER"), env!("VERGEN_RUSTC_HOST_TRIPLE")));
+
+    let command_help_string = "commands:
+    `help`: list valid commands and some system info
+    `say`: print a message
+    `boop`: boop another user :3
+    `dm`: send a DM to a user
+    `pfp`: send the profile picture of a user (defaults to yourself if no username is mentioned)
+    `invert`: send the profile picture of a user with inverted colors (defaults to yourself if no username is mentioned)
+    `join`: join the current voice channel
+    `leave`: leave the current voice channel
+    `play`: play the specified URL, or search YouTube and play the first result
+    `stop`: stop any currently playing audio
+    `z80`: execute the specified opcodes (in hexadecimal) in the Z80 emulator and print the register results on halt
+    `z80file`: like `z80` except it loads the opcodes from the attached file";
+    help_string.push_str(command_help_string);
+
+    send_msg(&ctx, &msg, &help_string).await;
+    Ok(())
 }
 
 // sets the activity specified by the user
@@ -290,7 +315,7 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
             Ok(source) => source,
             Err(why) => {
                 println!("Error starting source: {:?}", why);
-                send_msg(&ctx, &msg, "Error starting ffmpeg").await;
+                send_msg(&ctx, &msg, &format!("Error starting source: {:?}", why)).await;
                 return Ok(());
             },
         };
@@ -399,9 +424,26 @@ async fn boop(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     output.push_str(&msg.author.name);
     output.push_str(" boops ");
     output.push_str(&boop_receiver);
-    output.push_str(" UwU*");
+    output.push_str("* :3");
 
     send_msg(&ctx, &msg, &output).await;
+
+    Ok(())
+}
+
+// sends a user's profile picture
+#[command]
+async fn pfp(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
+    let user = &msg.mentions.get(0).unwrap_or(&msg.author);
+    let pfp_url = match user.avatar_url() {
+        Some(pfp_url) => pfp_url,
+        None => {
+            send_msg(&ctx, &msg, "Failed to get URL for user").await;
+            return Ok(());
+        },
+    };
+
+    send_msg(&ctx, &msg, &pfp_url).await;
 
     Ok(())
 }
@@ -414,7 +456,6 @@ async fn invert(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         Some(pfp_url) => pfp_url,
         None => {
             send_msg(&ctx, &msg, "Failed to get URL for user").await;
-
             return Ok(());
         },
     };
@@ -595,12 +636,6 @@ async fn z80_execute(ctx: &Context, msg: &Message, mut memory_vec: Vec<u8>) -> C
 
         Ok(())
     }
-}
-
-#[command]
-async fn about(ctx: &Context, msg: &Message) -> CommandResult {
-    send_msg(&ctx, &msg, "This is rybot2! UwU").await;
-    Ok(())
 }
 
 #[command]
