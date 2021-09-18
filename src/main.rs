@@ -52,15 +52,15 @@ struct General;
 async fn normal_message(ctx: &Context, msg: &Message) {
     let message_string = msg.content.to_lowercase().split_whitespace().collect::<String>();
     if message_string.contains("fox") {
-        println!("{} found a fox OwO", msg.author.name);
+        //println!("{} found a fox OwO", msg.author.name);
         react_msg(ctx, msg, ReactionType::Unicode("🦊".to_string())).await;
     }
     if message_string.contains("cat") {
-        println!("{} found a stinky cat :(", msg.author.name);
+        //println!("{} found a stinky cat :(", msg.author.name);
         react_msg(ctx, msg, ReactionType::Unicode("🐱".to_string())).await;
     }
     if message_string.contains("lemon") {
-        println!("{} found a sour lemon", msg.author.name);
+        //println!("{} found a sour lemon", msg.author.name);
         react_msg(ctx, msg, ReactionType::Unicode("🍋".to_string())).await;
     }
 }
