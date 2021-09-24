@@ -1,6 +1,6 @@
 [package]
 name = "rybot2"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["ry755"]
 edition = "2018"
 build = "build.rs"
@@ -22,6 +22,7 @@ tracing-futures = "0.2"
 
 [dependencies.songbird]
 version = "0.2.0"
+features = ["builtin-queue"]
 
 [dependencies.serenity]
 version = "0.10"

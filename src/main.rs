@@ -1,4 +1,5 @@
 use error_chain::error_chain;
+use libwebp::WebPDecodeRGB;
 use std::{env, sync::Arc};
 use serenity::{
     async_trait,
@@ -16,11 +17,11 @@ use serenity::{
     utils::{content_safe, ContentSafeOptions},
     prelude::*,
 };
+use image::{RgbImage, imageops};
 use songbird::SerenityInit;
 use tempfile::Builder;
 
 struct ShardManagerContainer;
-
 impl TypeMapKey for ShardManagerContainer {
     type Value = Arc<Mutex<ShardManager>>;
 }
@@ -32,11 +33,7 @@ error_chain! {
     }
 }
 
-use image::{RgbImage, imageops};
-use libwebp::WebPDecodeRGB;
-
 struct Handler;
-
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, _: Context, ready: Ready) {
@@ -45,7 +42,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(help, activity, say, boop, pfp, invert, ping, join, leave, play, stop, dm)]
+#[commands(help, activity, say, boop, dm, pfp, invert, ping, join, leave, play, skip, stop, np)]
 struct General;
 
 #[hook]
@@ -66,23 +63,23 @@ async fn normal_message(ctx: &Context, msg: &Message) {
 }
 
 async fn send_msg(ctx: &Context, msg: &Message, content: &str) {
-    if let Err(why) = msg.channel_id.say(&ctx.http, &content).await {
-        println!("Error sending message: {:?}", why);
+    if let Err(reason) = msg.channel_id.say(&ctx.http, &content).await {
+        println!("Error sending message: {:?}", reason);
     }
 }
 
 async fn react_msg(ctx: &Context, msg: &Message, reaction: ReactionType) {
-    if let Err(why) = msg.react(&ctx.http, reaction).await {
-        println!("Error reacting to message: {:?}", why);
+    if let Err(reason) = msg.react(&ctx.http, reaction).await {
+        println!("Error reacting to message: {:?}", reason);
     }
 }
 
 
 async fn send_file(ctx: &Context, msg: &Message, path: Vec<&str>) {
-    if let Err(why) = msg.channel_id.send_files(&ctx.http, path, |m| {
+    if let Err(reason) = msg.channel_id.send_files(&ctx.http, path, |m| {
         m.content("")
     }).await {
-        println!("Error sending file: {:?}", why);
+        println!("Error sending file: {:?}", reason);
     }
 }
 
@@ -111,8 +108,8 @@ async fn main() {
         data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
     }
 
-    if let Err(why) = client.start().await {
-        println!("Client error: {:?}", why);
+    if let Err(reason) = client.start().await {
+        println!("Client error: {:?}", reason);
     }
 }
 
@@ -122,18 +119,22 @@ async fn help(ctx: &Context, msg: &Message) -> CommandResult {
     help_string.push_str(&format!("compiled on {} at {} ({})\n", env!("VERGEN_BUILD_DATE"), env!("VERGEN_BUILD_TIME"), env!("VERGEN_CARGO_PROFILE")));
     help_string.push_str(&format!("rustc {} ({})\n\n", env!("VERGEN_RUSTC_SEMVER"), env!("VERGEN_RUSTC_HOST_TRIPLE")));
 
-    let command_help_string = "commands:
+    let audio_command_help_string = "audio playback commands:
+    `join`: join the current voice channel
+    `leave`: leave the current voice channel
+    `play`: queue/play the specified URL, or search YouTube and queue/play the first result
+    `skip`: skip the currently playing audio in the queue
+    `stop`: clear the audio queue
+    `np`: view current audio playback info\n\n";
+    let misc_command_help_string = "misc commands:
     `help`: list valid commands and some system info
     `say`: print a message
     `boop`: boop another user :3
     `dm`: send a DM to a user
     `pfp`: send the profile picture of a user (defaults to yourself if no username is mentioned)
-    `invert`: send the profile picture of a user with inverted colors (defaults to yourself if no username is mentioned)
-    `join`: join the current voice channel
-    `leave`: leave the current voice channel
-    `play`: play the specified URL, or search YouTube and play the first result
-    `stop`: stop any currently playing audio";
-    help_string.push_str(command_help_string);
+    `invert`: send the profile picture of a user with inverted colors (defaults to yourself if no username is mentioned)";
+    help_string.push_str(audio_command_help_string);
+    help_string.push_str(misc_command_help_string);
 
     send_msg(&ctx, &msg, &help_string).await;
     Ok(())
@@ -189,8 +190,8 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
     let has_handler = manager.get(guild_id).is_some();
 
     if has_handler {
-        if let Err(e) = manager.remove(guild_id).await {
-            send_msg(&ctx, &msg, format!("Failed: {:?}", e).as_str()).await;
+        if let Err(reason) = manager.remove(guild_id).await {
+            send_msg(&ctx, &msg, format!("Failed: {:?}", reason).as_str()).await;
         }
 
         send_msg(&ctx, &msg, "Left voice channel").await;
@@ -236,9 +237,9 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 
         let source = match source {
             Ok(source) => source,
-            Err(why) => {
-                println!("Error starting source: {:?}", why);
-                send_msg(&ctx, &msg, &format!("Error starting source: {:?}", why)).await;
+            Err(reason) => {
+                println!("Error starting source: {:?}", reason);
+                send_msg(&ctx, &msg, &format!("Error starting source: {:?}", reason)).await;
                 return Ok(());
             },
         };
@@ -246,10 +247,36 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         {
             let source_url_option = (&source.metadata.source_url).clone();
             let source_url = source_url_option.unwrap_or("Unable to extract source URL".to_string());
-            send_msg(&ctx, &msg, &format!("Playing audio ({})", source_url)).await;
+            let queue_or_play = if handler.queue().is_empty() { "Playing" } else { "Queuing" };
+            send_msg(&ctx, &msg, &format!("{} audio ({})", queue_or_play, source_url)).await;
         }
 
-        handler.play_only_source(source);
+        handler.enqueue_source(source);
+    } else {
+        send_msg(&ctx, &msg, "Not in a voice channel").await;
+    }
+
+    Ok(())
+}
+
+// skips currently playing audio
+#[command]
+#[only_in(guilds)]
+async fn skip(ctx: &Context, msg: &Message) -> CommandResult {
+    let guild = msg.guild(&ctx.cache).await.unwrap();
+    let guild_id = guild.id;
+
+    let manager = songbird::get(ctx).await.expect("Error getting Songbird client").clone();
+
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let handler = handler_lock.lock().await;
+
+        match handler.queue().skip() {
+            Ok(_) => {},
+            Err(reason) => send_msg(&ctx, &msg, &format!("Error skipping audio: {:?}", reason)).await,
+        }
+
+        send_msg(&ctx, &msg, "Skipped audio").await;
     } else {
         send_msg(&ctx, &msg, "Not in a voice channel").await;
     }
@@ -267,11 +294,51 @@ async fn stop(ctx: &Context, msg: &Message) -> CommandResult {
     let manager = songbird::get(ctx).await.expect("Error getting Songbird client").clone();
 
     if let Some(handler_lock) = manager.get(guild_id) {
-        let mut handler = handler_lock.lock().await;
+        let handler = handler_lock.lock().await;
 
-        handler.stop();
+        handler.queue().stop();
 
         send_msg(&ctx, &msg, "Stopped audio playback").await;
+    } else {
+        send_msg(&ctx, &msg, "Not in a voice channel").await;
+    }
+
+    Ok(())
+}
+
+// sends current audio playback info
+#[command]
+#[only_in(guilds)]
+async fn np(ctx: &Context, msg: &Message) -> CommandResult {
+    let guild = msg.guild(&ctx.cache).await.unwrap();
+    let guild_id = guild.id;
+
+    let manager = songbird::get(ctx).await.expect("Error getting Songbird client").clone();
+
+    if let Some(handler_lock) = manager.get(guild_id) {
+        let handler = handler_lock.lock().await;
+
+        let current_track_or_error = handler.queue().current();
+        let current_track = match current_track_or_error {
+            Some(current_track) => current_track,
+            None => {
+                send_msg(&ctx, &msg, "No audio track appears to be playing at the moment").await;
+                return Ok(());
+            }
+        };
+        let song_title = current_track.metadata().title.clone();
+        let song_track = current_track.metadata().track.clone();
+        let song_artist = current_track.metadata().artist.clone();
+        let song_yt_channel = current_track.metadata().channel.clone();
+        let song_url = current_track.metadata().source_url.clone();
+
+        let mut song_string = "Currently playing audio track:\n".to_string();
+        song_string.push_str(&format!("    title: {}\n", song_title.unwrap_or("none".to_string())));
+        song_string.push_str(&format!("    track: {}\n", song_track.unwrap_or("none".to_string())));
+        song_string.push_str(&format!("    artist: {}\n", song_artist.unwrap_or("none".to_string())));
+        song_string.push_str(&format!("    YouTube channel: {}\n", song_yt_channel.unwrap_or("none".to_string())));
+        song_string.push_str(&format!("    URL: <{}>", song_url.unwrap_or("none".to_string())));
+        send_msg(&ctx, &msg, &song_string).await;
     } else {
         send_msg(&ctx, &msg, "Not in a voice channel").await;
     }
