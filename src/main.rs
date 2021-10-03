@@ -47,18 +47,24 @@ struct General;
 
 #[hook]
 async fn normal_message(ctx: &Context, msg: &Message) {
-    let message_string = msg.content.to_lowercase().split_whitespace().collect::<String>();
-    if message_string.contains("fox") {
-        //println!("{} found a fox OwO", msg.author.name);
-        react_msg(ctx, msg, ReactionType::Unicode("🦊".to_string())).await;
-    }
-    if message_string.contains("cat") {
-        //println!("{} found a stinky cat :(", msg.author.name);
-        react_msg(ctx, msg, ReactionType::Unicode("🐱".to_string())).await;
-    }
-    if message_string.contains("lemon") {
-        //println!("{} found a sour lemon", msg.author.name);
-        react_msg(ctx, msg, ReactionType::Unicode("🍋".to_string())).await;
+    // TODO: this method of disabling reactions in vent channels is hacky
+    //       a better method would be to allow users to configure this on a per-channnel basis
+    //       using commands that would write to some kind of external config file.
+    let message_channel = msg.channel_id.name(&ctx.cache).await;
+    if message_channel != Some("vent".to_string()) {
+        let message_string = msg.content.to_lowercase().split_whitespace().collect::<String>();
+        if message_string.contains("fox") {
+            //println!("{} found a fox OwO", msg.author.name);
+            react_msg(ctx, msg, ReactionType::Unicode("🦊".to_string())).await;
+        }
+        if message_string.contains("cat") {
+            //println!("{} found a stinky cat :(", msg.author.name);
+            react_msg(ctx, msg, ReactionType::Unicode("🐱".to_string())).await;
+        }
+        if message_string.contains("lemon") {
+            //println!("{} found a sour lemon", msg.author.name);
+            react_msg(ctx, msg, ReactionType::Unicode("🍋".to_string())).await;
+        }
     }
 }
 
