@@ -379,7 +379,7 @@ async fn dm(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         None => {
             send_msg(&ctx, &msg, "Mention someone to DM! uwu").await;
 
-            return Ok(()); // return from command early
+            return Ok(());
         },
     };
     // this is probably a bad way of removing the mentioned user from the argument string
@@ -465,14 +465,14 @@ async fn invert(ctx: &Context, msg: &Message) -> CommandResult {
     let (width, height, buf) = WebPDecodeRGB(content.as_ref())?;
     let mut pixel_buf = match RgbImage::from_vec(width, height, buf.to_vec()) {
         Some(pixel_buf) => pixel_buf,
-        None => return Ok(()) // return from command early
+        None => return Ok(())
     };
 
     imageops::invert(&mut pixel_buf);
 
     let file_path = match file.path().to_str() {
         Some(file_path) => file_path,
-        None => return Ok(()) // return from command early
+        None => return Ok(())
     };
     println!("temp file location: {:?}", file_path);
     pixel_buf.save(file_path)?;
@@ -518,7 +518,7 @@ async fn color(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 
     let file_path = match file.path().to_str() {
         Some(file_path) => file_path,
-        None => return Ok(()) // return from command early
+        None => return Ok(())
     };
     println!("temp file location: {:?}", file_path);
     pixel_buf.save(file_path)?;
