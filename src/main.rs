@@ -139,7 +139,7 @@ async fn help(ctx: &Context, msg: &Message) -> CommandResult {
     `dm`: send a DM to a user
     `pfp`: send the profile picture of a user (defaults to yourself if no username is mentioned)
     `invert`: send the profile picture of a user with inverted colors (defaults to yourself if no username is mentioned)
-    `color`: send a 64x64 image of the specified hexadecimal color code (for example: `B28FEB`)";
+    `color`/`colour`: send a 64x64 image of the specified hexadecimal color code (for example: `B28FEB`)";
     help_string.push_str(audio_command_help_string);
     help_string.push_str(misc_command_help_string);
 
@@ -484,6 +484,7 @@ async fn invert(ctx: &Context, msg: &Message) -> CommandResult {
 
 // sends a small image of a specified hexadecimal color code
 #[command]
+#[aliases(colour)]
 async fn color(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let mut parsed_args = Args::new(args.rest(), &[Delimiter::Single(' ')]);
     let color_code_string = match parsed_args.single::<String>() {
