@@ -1,6 +1,6 @@
 [package]
 name = "rybot2"
-version = "0.3.1"
+version = "0.4.0"
 authors = ["ry755"]
 edition = "2018"
 build = "build.rs"
@@ -10,6 +10,7 @@ anyhow = "1.0"
 vergen = "5"
 
 [dependencies]
+hex = "0.4.3"
 image = "0.23.12"
 libwebp = { version = "0.1.2", features = ["0_6"] }
 error-chain = "0.12.4"

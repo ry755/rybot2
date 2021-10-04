@@ -17,7 +17,7 @@ use serenity::{
     utils::{content_safe, ContentSafeOptions},
     prelude::*,
 };
-use image::{RgbImage, imageops};
+use image::{ImageBuffer, RgbImage, imageops};
 use songbird::SerenityInit;
 use tempfile::Builder;
 
@@ -42,7 +42,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(help, activity, say, boop, dm, pfp, invert, ping, join, leave, play, skip, stop, np)]
+#[commands(help, activity, say, boop, dm, pfp, invert, color, ping, join, leave, play, skip, stop, np)]
 struct General;
 
 #[hook]
@@ -138,7 +138,8 @@ async fn help(ctx: &Context, msg: &Message) -> CommandResult {
     `boop`: boop another user :3
     `dm`: send a DM to a user
     `pfp`: send the profile picture of a user (defaults to yourself if no username is mentioned)
-    `invert`: send the profile picture of a user with inverted colors (defaults to yourself if no username is mentioned)";
+    `invert`: send the profile picture of a user with inverted colors (defaults to yourself if no username is mentioned)
+    `color`: send a 64x64 image of the specified hexadecimal color code (for example: `B28FEB`)";
     help_string.push_str(audio_command_help_string);
     help_string.push_str(misc_command_help_string);
 
@@ -429,7 +430,7 @@ async fn boop(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 
 // sends a user's profile picture
 #[command]
-async fn pfp(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
+async fn pfp(ctx: &Context, msg: &Message) -> CommandResult {
     let user = &msg.mentions.get(0).unwrap_or(&msg.author);
     let pfp_url = match user.avatar_url() {
         Some(pfp_url) => pfp_url,
@@ -446,7 +447,7 @@ async fn pfp(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
 
 // inverts a user's profile picture
 #[command]
-async fn invert(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
+async fn invert(ctx: &Context, msg: &Message) -> CommandResult {
     let user = &msg.mentions.get(0).unwrap_or(&msg.author);
     let pfp_url = match user.avatar_url() {
         Some(pfp_url) => pfp_url,
@@ -468,6 +469,52 @@ async fn invert(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     };
 
     imageops::invert(&mut pixel_buf);
+
+    let file_path = match file.path().to_str() {
+        Some(file_path) => file_path,
+        None => return Ok(()) // return from command early
+    };
+    println!("temp file location: {:?}", file_path);
+    pixel_buf.save(file_path)?;
+    let path = vec![file_path];
+    send_file(&ctx, &msg, path).await;
+
+    Ok(())
+}
+
+// sends a small image of a specified hexadecimal color code
+#[command]
+async fn color(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let mut parsed_args = Args::new(args.rest(), &[Delimiter::Single(' ')]);
+    let color_code_string = match parsed_args.single::<String>() {
+        Ok(color_code_string) => color_code_string,
+        Err(_) => {
+            send_msg(&ctx, &msg, "Specify a hexadecimal color code (for example: `B28FEB`)").await;
+
+            return Ok(());
+        },
+    };
+    let color_code_or_error = hex::decode(color_code_string);
+    let color_code = match color_code_or_error {
+        Ok(color_code) => color_code,
+        Err(reason) => {
+            send_msg(&ctx, &msg, &format!("An error occurred while parsing the hexadecimal color code: {}", reason)).await;
+
+            return Ok(());
+        }
+    };
+
+    if color_code.len() != 3 {
+        send_msg(&ctx, &msg, "An error occurred while parsing the hexadecimal color code: Must provide exactly 3 bytes (RGB)").await;
+
+        return Ok(());
+    }
+
+    let file = Builder::new().suffix(".png").tempfile()?;
+
+    let pixel_buf = ImageBuffer::from_fn(64, 64, |_, _| {
+        image::Rgb([color_code[0], color_code[1], color_code[2]])
+    });
 
     let file_path = match file.path().to_str() {
         Some(file_path) => file_path,
