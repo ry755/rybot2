@@ -201,7 +201,7 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
             send_msg(&ctx, &msg, format!("Failed: {:?}", reason).as_str()).await;
         }
 
-        send_msg(&ctx, &msg, "Left voice channel").await;
+        send_msg(&ctx, &msg, "Left the voice channel").await;
     } else {
         send_msg(&ctx, &msg, "Not in a voice channel").await;
     }
