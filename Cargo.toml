@@ -1,6 +1,6 @@
 [package]
 name = "rybot2"
-version = "0.4.1"
+version = "0.4.2"
 authors = ["ry755"]
 edition = "2018"
 build = "build.rs"

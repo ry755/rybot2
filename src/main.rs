@@ -1,24 +1,27 @@
 use error_chain::error_chain;
 use libwebp::WebPDecodeRGB;
-use std::{env, sync::Arc};
+use std::{env, sync::{Arc, atomic::{AtomicUsize, Ordering}}, time::Duration};
 use serenity::{
     async_trait,
     client::Context,
-    client::bridge::gateway::ShardManager,
+    client::{Client, EventHandler, bridge::gateway::ShardManager},
     framework::standard::{
         Args, CommandResult,
         Delimiter, StandardFramework,
         macros::{command, group, hook},
     },
+    http::Http,
     model::{
         channel::{Message, ReactionType},
         gateway::{Activity, Ready},
+        misc::Mentionable,
+        prelude::{ChannelId, GuildId},
     },
     utils::{content_safe, ContentSafeOptions},
     prelude::*,
 };
 use image::{ImageBuffer, RgbImage, imageops};
-use songbird::SerenityInit;
+use songbird::{Event, EventContext, EventHandler as VoiceEventHandler, SerenityInit, Songbird};
 use tempfile::Builder;
 
 struct ShardManagerContainer;
@@ -173,10 +176,62 @@ async fn join_impl(ctx: &Context, msg: &Message) -> CommandResult {
 
     let manager = songbird::get(ctx).await.expect("Error getting Songbird client").clone();
 
-    let _handler = manager.join(guild_id, connect_to).await;
-    send_msg(&ctx, &msg, "Joined voice channel").await;
+    let (handle_lock, success) = manager.join(guild_id, connect_to).await;
+    if let Ok(_channel) = success {
+        send_msg(&ctx, &msg, &format!("Joined {}", connect_to.mention())).await;
+        let channel_id = msg.channel_id;
+        let send_http = ctx.http.clone();
+        let mut handle = handle_lock.lock().await;
+        handle.add_global_event(
+            Event::Periodic(Duration::from_secs(60), None),
+            ChannelDurationNotifier {
+                channel_id,
+                count: Default::default(),
+                http: send_http,
+                manager,
+                guild_id,
+            },
+        );
+    } else {
+        send_msg(&ctx, &msg, "Failed to join voice channel").await;
+    }
 
     Ok(())
+}
+
+struct ChannelDurationNotifier {
+    channel_id: ChannelId,
+    count: Arc<AtomicUsize>,
+    http: Arc<Http>,
+
+    manager: Arc<Songbird>,
+    guild_id: GuildId,
+}
+
+#[async_trait]
+impl VoiceEventHandler for ChannelDurationNotifier {
+    async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
+        let count = self.count.fetch_add(1, Ordering::Relaxed) + 1;
+
+        if let Some(handler_lock) = self.manager.get(self.guild_id) {
+            let handler = handler_lock.lock().await;
+            if handler.queue().current().is_some() {
+                // the audio queue isn't empty, so set the number of minutes since last inactive to 0
+                self.count.store(0, Ordering::Relaxed);
+            }
+        }
+
+        if count == 5 {
+            // 5 minutes have passed since the audio queue last contained anything, so leave the VC
+            if let Err(reason) = self.manager.remove(self.guild_id).await {
+                self.channel_id.say(&self.http, &format!("Failed: {:?}", reason).as_str()).await.unwrap();
+            }
+            self.channel_id.say(&self.http, "Left the voice channel due to inactivity").await.unwrap();
+            self.count.store(0, Ordering::Relaxed);
+        }
+
+        None
+    }
 }
 
 // joins the voice channel that the requesting user is currently in
