@@ -56,7 +56,7 @@ async fn normal_message(ctx: &Context, msg: &Message) {
     let message_channel = msg.channel_id.name(&ctx.cache).await;
     if message_channel != Some("vent".to_string()) {
         let message_string = msg.content.to_lowercase().split_whitespace().collect::<String>();
-        if message_string.contains("fox") {
+        if message_string.contains("fox") || message_string.contains("focks") {
             //println!("{} found a fox OwO", msg.author.name);
             react_msg(ctx, msg, ReactionType::Unicode("🦊".to_string())).await;
         }
@@ -207,6 +207,9 @@ struct ChannelDurationNotifier {
     manager: Arc<Songbird>,
     guild_id: GuildId,
 }
+
+// TODO: change `if let Some(handler_lock)` to `if let Some(handler)` and change `let handler = handler_lock.lock().await;` to `let handler_lock = handler.lock().await;`
+//       this should be changed throughout the entire file
 
 #[async_trait]
 impl VoiceEventHandler for ChannelDurationNotifier {
