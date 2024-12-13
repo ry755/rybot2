@@ -563,16 +563,20 @@ async fn color(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         }
     };
 
-    if color_code.len() != 3 {
-        send_msg(&ctx, &msg, "An error occurred while parsing the hexadecimal color code: Must provide exactly 3 bytes (RGB)").await;
-
+    let mut value4 = 255;
+    if color_code.len() != 3 && color_code.len() != 4 {
+        send_msg(&ctx, &msg, "An error occurred while parsing the hexadecimal color code: Must provide 3 or 4 bytes (RGB/RGBA)").await;
         return Ok(());
+    }
+
+    if color_code.len() == 4 {
+        value4 = color_code[3]
     }
 
     let file = Builder::new().suffix(".png").tempfile()?;
 
     let pixel_buf = ImageBuffer::from_fn(64, 64, |_, _| {
-        image::Rgb([color_code[0], color_code[1], color_code[2]])
+        image::Rgba([color_code[0], color_code[1], color_code[2], value4])
     });
 
     let file_path = match file.path().to_str() {
